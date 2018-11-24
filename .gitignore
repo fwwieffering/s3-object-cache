@@ -1,0 +1,4 @@
+# dep packages
+vendor/*
+# binary
+map-service-poc

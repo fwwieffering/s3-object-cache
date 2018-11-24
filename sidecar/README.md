@@ -1,0 +1,38 @@
+# map-service Sidecar
+A sidecar container to handle fetching maps from map service and implementing a local cache.
+
+## How To Use
+Run this container as part of your ECS Task / Kube Pod.
+
+To request a map:
+- `GET` `/map/{map_name}` get default map version. Can get dev default version by providing query parameter `?dev=true`. Returns map binary
+- `GET` `/map/{map_name}/{map_version}` get specific map version. Returns map binary
+
+## Caching
+The container implements an LRU cache to store maps locally. If the requested map/version is not present in the in-memory cache it is fetched from map-service and placed in the cache. The cache implementation used is the TwoQueueCache from [hashicorps golang-lru cache implentation](https://github.com/hashicorp/golang-lru).
+
+>TwoQueueCache tracks frequently used and recently used entries separately. This avoids a burst of accesses from taking out frequently used entries
+
+In addition to the LRU cache, each item in the cache expires in the configurable `CACHE_EXPIRY_SECONDS` to force an update.
+
+## Configuration
+Can configure
+- number of entries in cache
+- amount of memory allocated to the container
+- cache item expiration
+
+Map Size statistics:
+
+|    | Average Size | Median Size |
+|----|--------------|-------------|
+| **kB** | 585.449148   | 410.2900391 |
+| **MB** | 0.571727684  | 0.400673866 |
+
+Based on experience I have seen a cache size of 1000 fit into 2Gb memory.
+
+Environment variable configuration:
+
+| variable name | default  | description |
+|---------------|----------|-------------|
+| `CACHE_SIZE` | 1000 | number of entries to keep in the cache |
+| `CACHE_EXPIRY_SECONDS` | 300 | seconds to keep maps cached |
