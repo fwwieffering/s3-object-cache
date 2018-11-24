@@ -12,11 +12,11 @@ import (
 func main() {
 	var cacheSize int
 	var cacheExpirySeconds int
-	var mapServiceURL string
+	var objectServiceURL string
 
 	cacheSizeParam, sizeOk := os.LookupEnv("CACHE_SIZE")
 	cacheExpirySecondsParam, expiryOk := os.LookupEnv("CACHE_EXPIRY_SECONDS")
-	mapserviceParam, mapserviceparamOK := os.LookupEnv("MAP_SERVICE_URL")
+	objectserviceParam, objectserviceparamOK := os.LookupEnv("OBJECT_SERVICE_URL")
 
 	cacheSize = 1000
 	if sizeOk {
@@ -35,12 +35,13 @@ func main() {
 		}
 	}
 
-	mapServiceURL = "https://maps-poc.spsdev.in/map/"
-	if mapserviceparamOK {
-		mapServiceURL = mapserviceParam
+	if objectserviceparamOK {
+		objectServiceURL = objectserviceParam
+	} else {
+		log.Fatal("OBJECT_SERVICE_URL must be provided as an environment variable")
 	}
 
-	api := NewAPI(cacheSize, cacheExpirySeconds, mapServiceURL)
+	api := NewAPI(cacheSize, cacheExpirySeconds, objectServiceURL)
 
 	srv := &http.Server{
 		Handler:      api.Router,

@@ -20,57 +20,56 @@ type JSONResponse struct {
 }
 
 type API struct {
-	Router    *mux.Router
-	Cache     Cache
-	MapClient MapClient
+	Router       *mux.Router
+	Cache        Cache
+	ObjectClient ObjectClient
 }
 
 func NewAPI(cacheSize int, cacheExpirySeconds int, url string) *API {
 	router := mux.NewRouter()
 
 	api := &API{
-		Cache:     NewMapCache(cacheSize, cacheExpirySeconds),
-		Router:    router,
-		MapClient: NewMapServiceClient(url),
+		Cache:        NewObjectCache(cacheSize, cacheExpirySeconds),
+		Router:       router,
+		ObjectClient: NewObjectServiceClient(url),
 	}
 
-	router.HandleFunc("/map/{map}/{version}", api.GetMap).Methods("GET")
-	router.HandleFunc("/map/{map}", api.GetMap).Methods("GET")
+	router.HandleFunc("/{category}/{object}/{version}", api.GetObject).Methods("GET")
+	router.HandleFunc("/{category}/{object}", api.GetObject).Methods("GET")
 
 	router.Use(loggingMiddleware)
 
 	return api
 }
 
-type MapClient interface {
-	GetMap(mapname string, mapversion string, dev bool) ([]byte, error)
+type ObjectClient interface {
+	GetObject(objectname string, objectversion string, dev bool) ([]byte, error)
 }
 
-type MapServiceClient struct {
-	MapServiceURL string
+type ObjectServiceClient struct {
+	ObjectServiceURL string
 }
 
-// TODO: configurable map service url
-func NewMapServiceClient(url string) MapServiceClient {
-	return MapServiceClient{
-		MapServiceURL: url,
+func NewObjectServiceClient(url string) ObjectServiceClient {
+	return ObjectServiceClient{
+		ObjectServiceURL: url,
 	}
 }
 
-func (m MapServiceClient) GetMap(mapname string, mapversion string, dev bool) ([]byte, error) {
-	var endpoint = fmt.Sprintf("%s", mapname)
-	if len(mapversion) > 0 {
-		endpoint += fmt.Sprintf("/%s", mapversion)
+func (o ObjectServiceClient) GetObject(objectname string, objectversion string, dev bool) ([]byte, error) {
+	var endpoint = fmt.Sprintf("%s", objectname)
+	if len(objectversion) > 0 {
+		endpoint += fmt.Sprintf("/%s", objectversion)
 	}
 
-	if dev && len(mapversion) == 0 {
+	if dev && len(objectversion) == 0 {
 		endpoint += "?dev=true"
 	}
 
 	client := &http.Client{
 		Timeout: time.Second * 30,
 	}
-	res, err := client.Get(m.MapServiceURL + endpoint)
+	res, err := client.Get(o.ObjectServiceURL + endpoint)
 	if err != nil {
 		return nil, err
 	}
@@ -78,8 +77,8 @@ func (m MapServiceClient) GetMap(mapname string, mapversion string, dev bool) ([
 	defer res.Body.Close()
 
 	if res.StatusCode == 200 {
-		mapcontent, _ := ioutil.ReadAll(res.Body)
-		return mapcontent, nil
+		objectcontent, _ := ioutil.ReadAll(res.Body)
+		return objectcontent, nil
 	} else {
 		body, _ := ioutil.ReadAll(res.Body)
 
@@ -96,49 +95,51 @@ func loggingMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-func makeKey(mapname string, mapversion string, dev bool) string {
-	if len(mapversion) > 0 {
-		return fmt.Sprintf("%s/%s", mapname, mapversion)
+func makeKey(objectname string, objectversion string, dev bool) string {
+	if len(objectversion) > 0 {
+		return fmt.Sprintf("%s/%s", objectname, objectversion)
 	} else if dev {
-		return fmt.Sprintf("%s/dev", mapname)
+		return fmt.Sprintf("%s/dev", objectname)
 	}
-	return mapname
+	return objectname
 }
 
-// resolvemap fetches a map from the cache or from the map service, if needed
-func (a API) resolveMap(mapname string, mapversion string, dev bool) ([]byte, error) {
-	cacheKey := makeKey(mapname, mapversion, dev)
+// resolveobject fetches a object from the cache or from the object service, if needed
+func (a API) resolveObject(objectname string, objectversion string, dev bool) ([]byte, error) {
+	cacheKey := makeKey(objectname, objectversion, dev)
 
-	mapIface, exists := a.Cache.Get(cacheKey)
-	var mapContent []byte
+	objectIface, exists := a.Cache.Get(cacheKey)
+	var objectContent []byte
 	var err error
 
 	if exists {
-		fmt.Printf("Found map %s in cache\n", mapname)
-		mapContent = mapIface.([]byte)
+		fmt.Printf("Found object %s in cache\n", objectname)
+		objectContent = objectIface.([]byte)
 	} else {
-		fmt.Printf("Map %s not in cache, pulling from map service\n", mapname)
-		mapContent, err = a.MapClient.GetMap(mapname, mapversion, dev)
+		fmt.Printf("Object %s not in cache, pulling from object service\n", objectname)
+		objectContent, err = a.ObjectClient.GetObject(objectname, objectversion, dev)
 		if err != nil {
 			return nil, err
 		}
-		a.Cache.Add(cacheKey, mapContent)
+		a.Cache.Add(cacheKey, objectContent)
 	}
 
-	return mapContent, nil
+	return objectContent, nil
 }
 
-func (a API) GetMap(res http.ResponseWriter, req *http.Request) {
+func (a API) GetObject(res http.ResponseWriter, req *http.Request) {
 	routeVars := mux.Vars(req)
-	mapVersion := routeVars["version"]
-	mapName := routeVars["map"]
+	categoryName := routeVars["category"]
+	objectVersion := routeVars["version"]
+	objectName := routeVars["object"]
+	objectKey := fmt.Sprintf("%s/%s", categoryName, objectName)
 
 	dev := req.URL.Query().Get("dev")
 	devParam := strings.ToLower(dev) == "true"
 
-	mapcontent, err := a.resolveMap(mapName, mapVersion, devParam)
+	objectcontent, err := a.resolveObject(objectKey, objectVersion, devParam)
 	if err == nil {
-		res.Write(mapcontent)
+		res.Write(objectcontent)
 		res.Header().Set("Content-Type", "application/java-archive")
 	} else {
 		responseBody, _ := json.Marshal(JSONResponse{

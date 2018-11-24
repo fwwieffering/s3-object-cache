@@ -11,40 +11,40 @@ type Cache interface {
 	Get(key string) (interface{}, bool)
 }
 
-// MapCache implements an LRU cache with per-item expiration
-type MapCache struct {
+// ObjectCache implements an LRU cache with per-item expiration
+type ObjectCache struct {
 	cache         *lru.TwoQueueCache
-	expiryMap     map[string]time.Time
+	expiryObject  map[string]time.Time
 	expirySeconds int
 }
 
-// NewMapCache returns a pointer to a MapCache
-func NewMapCache(size int, expirySeconds int) *MapCache {
+// NewObjectCache returns a pointer to a ObjectCache
+func NewObjectCache(size int, expirySeconds int) *ObjectCache {
 	c, _ := lru.New2Q(size)
-	return &MapCache{
+	return &ObjectCache{
 		cache:         c,
-		expiryMap:     make(map[string]time.Time),
+		expiryObject:  make(map[string]time.Time),
 		expirySeconds: expirySeconds,
 	}
 }
 
-// Add adds an item to the MapCache and sets the expiration time of that item in the expiryMap
-func (c *MapCache) Add(key string, value interface{}) {
+// Add adds an item to the ObjectCache and sets the expiration time of that item in the expiryObject
+func (c *ObjectCache) Add(key string, value interface{}) {
 	expiryTime := time.Now().Add(time.Second * time.Duration(c.expirySeconds))
-	c.expiryMap[key] = expiryTime
+	c.expiryObject[key] = expiryTime
 	c.cache.Add(key, value)
 }
 
-// GetMap returns an item if it exists in the cache and has not expired. If the item has expired
+// GetObject returns an item if it exists in the cache and has not expired. If the item has expired
 // it is removed from the cache and nil is returned
-func (c *MapCache) Get(key string) (interface{}, bool) {
-	expiryTime, timeOk := c.expiryMap[key]
+func (c *ObjectCache) Get(key string) (interface{}, bool) {
+	expiryTime, timeOk := c.expiryObject[key]
 	val, cacheOk := c.cache.Get(key)
 	if cacheOk && timeOk && time.Now().Before(expiryTime) {
 		return val, true
 	} else {
 		c.cache.Remove(key)
-		delete(c.expiryMap, key)
+		delete(c.expiryObject, key)
 		return nil, false
 	}
 }
