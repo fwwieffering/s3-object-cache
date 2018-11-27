@@ -139,14 +139,14 @@ func (a API) GetObject(res http.ResponseWriter, req *http.Request) {
 
 	objectcontent, err := a.resolveObject(objectKey, objectVersion, devParam)
 	if err == nil {
-		res.Write(objectcontent)
 		res.Header().Set("Content-Type", "application/java-archive")
+		res.Write(objectcontent)
 	} else {
 		responseBody, _ := json.Marshal(JSONResponse{
 			Status: "error",
 			Error:  err.Error(),
 		})
-		res.Write(responseBody)
 		res.WriteHeader(http.StatusInternalServerError)
+		res.Write(responseBody)
 	}
 }
