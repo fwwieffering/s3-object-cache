@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -17,7 +16,7 @@ import (
 	"github.com/aws/aws-sdk-go/service/s3/s3iface"
 )
 
-// TODO: add redis
+// ObjectController object to handle the storage, retrieval, and versioning of objects in s3 and dynamo
 type ObjectController struct {
 	bucket *string
 	path   string
@@ -26,6 +25,7 @@ type ObjectController struct {
 	ddb    dynamodbiface.DynamoDBAPI
 }
 
+// NewObjectController returns a new object controller
 func NewObjectController(bucket string, pathPrefix string, table string) *ObjectController {
 	var sess = session.Must(session.NewSession())
 	return &ObjectController{
@@ -37,7 +37,7 @@ func NewObjectController(bucket string, pathPrefix string, table string) *Object
 	}
 }
 
-// Orchestrator for getting objects.
+// GetObject Orchestrator for getting objects.
 // if version is supplied attempt to pull directly from S3
 // else, look up version in dynamo and return that
 // TODO: add redis cache
@@ -48,44 +48,46 @@ func (o ObjectController) GetObject(objectName string, version string, dev bool)
 	}
 	version, err := o.getObjectVersion(objectName, dev)
 	if err != nil {
-		return nil, errors.New(fmt.Sprintf("Error looking up version for object %s. Error:%s", objectName, err.Error()))
+		return nil, fmt.Errorf("Error looking up version for object %s. Error:%s", objectName, err.Error())
 	}
 	return o.getObjectFromS3(objectName, version)
 }
 
+// SetObjectVersion sets default prod/dev version of object objectName to version version
 func (o ObjectController) SetObjectVersion(objectName string, version string) error {
 	err := o.addObjectToDynamo(objectName, false, version)
 	if err != nil {
-		return errors.New(fmt.Sprintf("Unable to write object %s version %s info to dynamo. %s", objectName, version, err.Error()))
+		return fmt.Errorf("Unable to write object %s version %s info to dynamo. %s", objectName, version, err.Error())
 	}
 	return nil
 }
 
+// SetObjectDevVersion sets default dev version of object objectName to version version
 func (o ObjectController) SetObjectDevVersion(objectName string, version string) error {
 	err := o.addObjectToDynamo(objectName, true, version)
 	if err != nil {
-		return errors.New(fmt.Sprintf("Unable to write object %s version %s info to dynamo. %s", objectName, version, err.Error()))
+		return fmt.Errorf("Unable to write object %s version %s info to dynamo. %s", objectName, version, err.Error())
 	}
 	return nil
 }
 
-// Orchestrator for adding objects
+// AddObject Orchestrator for adding objects
 // checks if object version already written to s3
 // attempts to write objects to s3. Will not overwrite objects in S3, returns error
 // sets versions in database if dev/prod flags supplied
 func (o ObjectController) AddObject(objectName string, objectContent io.Reader, dev bool, prod bool, version string) error {
 	objectexists, err := o.checkVersionS3(objectName, version)
 	if err != nil {
-		return errors.New(fmt.Sprintf("Unexpected error looking up object %s version %s in S3: %s", objectName, version, err.Error()))
+		return fmt.Errorf("Unexpected error looking up object %s version %s in S3: %s", objectName, version, err.Error())
 	}
 	// return error if trying to redeploy same version of object
 	if objectexists && !(dev || prod) {
-		return errors.New(fmt.Sprintf("Object %s version %s already exists in S3. Not overwriting", objectName, version))
+		return fmt.Errorf("Object %s version %s already exists in S3. Not overwriting", objectName, version)
 	} else if !objectexists {
 		// write object to S3 if not already there
 		err := o.addObjectToS3(objectName, version, objectContent)
 		if err != nil {
-			return errors.New(fmt.Sprintf("Unable to write object %s version %s to S3. Error: %s", objectName, version, err.Error()))
+			return fmt.Errorf("Unable to write object %s version %s to S3. Error: %s", objectName, version, err.Error())
 		}
 	}
 	// update dynamo if dev/prod is set
@@ -98,6 +100,7 @@ func (o ObjectController) AddObject(objectName string, objectContent io.Reader, 
 	return nil
 }
 
+// generateItemContent is a helper to generate the dynamodb putItem input
 func generateItemContent(objectName string, dev bool, version string) map[string]*dynamodb.AttributeValue {
 	item := map[string]*dynamodb.AttributeValue{
 		"name": &dynamodb.AttributeValue{
@@ -120,16 +123,14 @@ func generateItemContent(objectName string, dev bool, version string) map[string
 	return item
 }
 
-// function for determining whether an aws error is retryable
+// isRetryable helper function for determining whether an aws error is retryable
 func isRetryable(err error) bool {
 	if aerr, ok := err.(awserr.Error); ok {
 		switch aerr.Code() {
 		case dynamodb.ErrCodeProvisionedThroughputExceededException:
 			return true
-			break
 		case dynamodb.ErrCodeInternalServerError:
 			return true
-			break
 		default:
 			return false
 		}
@@ -205,14 +206,14 @@ func (o ObjectController) getObjectVersion(objectName string, dev bool) (string,
 		if ok {
 			return *val.S, nil
 		} else {
-			return "", errors.New(fmt.Sprintf("No dev version set for object %s", objectName))
+			return "", fmt.Errorf("No dev version set for object %s", objectName)
 		}
 	}
 	val, ok := item["version"]
 	if ok {
 		return *val.S, nil
 	} else {
-		return "", errors.New(fmt.Sprintf("No version set for object %s", objectName))
+		return "", fmt.Errorf("No version set for object %s", objectName)
 	}
 }
 
@@ -255,6 +256,7 @@ func (o ObjectController) addObjectToS3(objectName string, version string, objec
 	byteArray, readErr := ioutil.ReadAll(objectContent)
 	if readErr != nil {
 		fmt.Printf("readerr %v\n", readErr)
+		return readErr
 	}
 
 	byteReader := bytes.NewReader(byteArray)
@@ -280,7 +282,7 @@ func (o ObjectController) getObjectFromS3(objectName string, version string) (io
 		aerr, ok := err.(awserr.Error)
 		// format not found errors nicely
 		if ok && aerr.Code() == s3.ErrCodeNoSuchKey {
-			return nil, errors.New(fmt.Sprintf("Object %s version %s does not exist", objectName, version))
+			return nil, fmt.Errorf("Object %s version %s does not exist", objectName, version)
 		}
 		return nil, err
 	}
