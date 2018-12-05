@@ -205,16 +205,14 @@ func (o ObjectController) getObjectVersion(objectName string, dev bool) (string,
 		val, ok := item["dev"]
 		if ok {
 			return *val.S, nil
-		} else {
-			return "", fmt.Errorf("No dev version set for object %s", objectName)
 		}
+		return "", fmt.Errorf("No dev version set for object %s", objectName)
 	}
 	val, ok := item["version"]
 	if ok {
 		return *val.S, nil
-	} else {
-		return "", fmt.Errorf("No version set for object %s", objectName)
 	}
+	return "", fmt.Errorf("No version set for object %s", objectName)
 }
 
 // generates the key for a object to be stored / retrieved from
