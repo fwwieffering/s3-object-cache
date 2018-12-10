@@ -13,11 +13,14 @@ before_install:
 script:
   - go test -cover
   - make container
-  - docker tag fwieffering/s3-object-cache fwwieffering/s3-object-cache:$TRAVIS_COMMIT
+  - docker tag fwieffering/s3-object-cache fwieffering/s3-object-cache:$TRAVIS_COMMIT
   - make sidecar-container
-  - docker tag fwieffering/s3-object-cache-sidecar fwwieffering/s3-object-cache-sidecar:$TRAVIS_COMMIT
+  - docker tag fwieffering/s3-object-cache-sidecar "fwieffering/s3-object-cache-sidecar:$TRAVIS_COMMIT"
+  - docker push fwieffering/s3-object-cache:latest
+  - docker push "fwieffering/s3-object-cache:$TRAVIS_COMMIT"
+  - docker push fwieffering/s3-object-cache-sidecar:latest
+  - docker push "fwieffering/s3-object-cache-sidecar:$TRAVIS_COMMIT"
 
-
-# branches:
-#   only:
-#     - master
+branches:
+  only:
+    - master
