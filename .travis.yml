@@ -10,12 +10,12 @@ before_install:
 - dep ensure
 - echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
 
-script: |
-  go test -cover
-  make container
-  docker tag fwwieffering/s3-object-cache fwwieffering/s3-object-cache:$TRAVIS_COMMIT
-  make sidecar-container
-  docker tag fwwieffering/s3-object-cache-sidecar fwwieffering/s3-object-cache-sidecar:$TRAVIS_COMMIT
+script:
+  - go test -cover
+  - make container
+  - docker tag fwwieffering/s3-object-cache fwwieffering/s3-object-cache:$TRAVIS_COMMIT
+  - make sidecar-container
+  - docker tag fwwieffering/s3-object-cache-sidecar fwwieffering/s3-object-cache-sidecar:$TRAVIS_COMMIT
 
 
 # branches:
