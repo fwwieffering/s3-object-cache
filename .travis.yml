@@ -14,7 +14,7 @@ script: |
   go test -cover
   make container
   docker tag fwwieffering/s3-object-cache fwwieffering/s3-object-cache:$TRAVIS_COMMIT
-  make sidecar
+  make sidecar-container
   docker tag fwwieffering/s3-object-cache-sidecar fwwieffering/s3-object-cache-sidecar:$TRAVIS_COMMIT
 
 

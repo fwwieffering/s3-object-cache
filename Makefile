@@ -4,5 +4,5 @@ build:
 container: build
 	docker build -t fwwieffering/s3-object-cache .
 
-sidecar:
+sidecar-container:
 	make -C sidecar container
