@@ -1,8 +1,8 @@
 build:
-	CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o map-service-poc
+	CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o s3-object-cache
 
 container: build
-	docker build -t map-service-poc .
+	docker build -t fwieffering/s3-object-cache .
 
-sidecar:
+sidecar-container:
 	make -C sidecar container

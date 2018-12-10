@@ -1,0 +1,26 @@
+sudo: required
+
+services:
+  - docker
+
+language: go
+
+before_install:
+- curl https://raw.githubusercontent.com/golang/dep/master/install.sh | sh
+- dep ensure
+- echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
+
+script:
+  - go test -cover
+  - make container
+  - docker tag fwieffering/s3-object-cache fwieffering/s3-object-cache:$TRAVIS_COMMIT
+  - make sidecar-container
+  - docker tag fwieffering/s3-object-cache-sidecar "fwieffering/s3-object-cache-sidecar:$TRAVIS_COMMIT"
+  - docker push fwieffering/s3-object-cache:latest
+  - docker push "fwieffering/s3-object-cache:$TRAVIS_COMMIT"
+  - docker push fwieffering/s3-object-cache-sidecar:latest
+  - docker push "fwieffering/s3-object-cache-sidecar:$TRAVIS_COMMIT"
+
+branches:
+  only:
+    - master
