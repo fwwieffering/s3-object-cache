@@ -1,3 +1,6 @@
+# only build on tag
+if: tag = true
+
 sudo: required
 
 services:
@@ -21,6 +24,6 @@ script:
   - docker push fwieffering/s3-object-cache-sidecar:latest
   - docker push "fwieffering/s3-object-cache-sidecar:$TRAVIS_COMMIT"
 
-branches:
-  only:
-    - master
+# branches:
+#   only:
+#     - master
