@@ -102,35 +102,6 @@ func TestResolveObject(t *testing.T) {
 	}
 }
 
-// integration test
-// func TestObjectServiceClientGetObject(t *testing.T) {
-// 	api := NewAPI(1000, 60, "https://foo.bar.com/")
-// 	// this object exists, and I know it does
-// 	m, err := api.ObjectClient.GetObject("BelKaukana_co_grocery_v5010_groceryPoFedsWrite.jar", "", true)
-// 	if err != nil {
-// 		t.Fatalf("ObjectClient.GetObject returned an err: %s", err.Error())
-// 	}
-// 	if len(m) == 0 {
-// 		t.Fatalf("ObjectClient.GetObject content length was 0")
-// 	}
-// 	// I know this version exists
-// 	m, err = api.ObjectClient.GetObject("BelKaukana_co_grocery_v5010_groceryPoFedsWrite.jar", "56c451cd132eb85c2b433906c4d69b435dc8af4f356df760a0cbf113160aba57", false)
-// 	if err != nil {
-// 		t.Fatalf("ObjectClient.GetObject returned an err: %s", err.Error())
-// 	}
-// 	if len(m) == 0 {
-// 		t.Fatalf("ObjectClient.GetObject content length was 0")
-// 	}
-// 	// I know this version of the object does not exist
-// 	m, err = api.ObjectClient.GetObject("BelKaukana_co_grocery_v5010_groceryPoFedsWrite.jar", "badversion", false)
-// 	if err == nil {
-// 		t.Fatalf("ObjectClient.GetObject should have returned an error (but this test is brittle)")
-// 	}
-// 	if len(m) > 0 {
-// 		t.Fatalf("ObjectClient.GetObject content length was 0")
-// 	}
-// }
-
 func TestAPIGetObject(t *testing.T) {
 	req := makeRequest("foo", "bar.jar", "", false)
 	res := httptest.NewRecorder()

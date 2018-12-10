@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -169,5 +170,88 @@ func TestSetObjectVznHandler(t *testing.T) {
 	api.GetObjectHandler(res, req)
 	if res.Code != http.StatusOK {
 		t.Fatalf("GetObjectHandler should have succeeded. Status code: %d", res.Code)
+	}
+}
+
+func TestAPIListRequestsHappy(t *testing.T) {
+	happyAPI := &API{
+		Objects: &ObjectController{
+			bucket: aws.String("unit test"),
+			path:   "dang",
+			s3: &MockS3{
+				bucket: map[string]string{
+					"dang/fun/foo.obj/123abc":  "wonderful magic content",
+					"dang/work/bar.obj/456789": "more incredible content",
+				},
+			},
+		},
+	}
+
+	listCategoriesRes := httptest.NewRecorder()
+	listCategoriesReq := httptest.NewRequest("GET", "/", nil)
+	happyAPI.ListCategoriesHandler(listCategoriesRes, listCategoriesReq)
+	if listCategoriesRes.Code != 200 {
+		t.Fatalf("API.ListCategoriesHandler should return a 200. Got: %d", listCategoriesRes.Code)
+	}
+
+	listObjectsRes := httptest.NewRecorder()
+	listObjectsReq := mux.SetURLVars(httptest.NewRequest("GET", "/fun", nil), map[string]string{
+		"category": "fun",
+	})
+	happyAPI.ListObjectsHandler(listObjectsRes, listObjectsReq)
+	if listObjectsRes.Code != 200 {
+		t.Fatalf("API.ListObjectsHandler should return a 200. Got %d", listObjectsRes.Code)
+	}
+
+	listVersionsRes := httptest.NewRecorder()
+	listVersionsReq := mux.SetURLVars(httptest.NewRequest("GET", "/fun/foo.obj/versions", nil), map[string]string{
+		"category": "fun",
+		"object":   "foo.obj",
+	})
+	happyAPI.ListObjectVersionsHandler(listVersionsRes, listVersionsReq)
+	if listVersionsRes.Code != 200 {
+		t.Fatalf("API.ListObjectVersionsHandler should return a 200. Got: %d", listVersionsRes.Code)
+	}
+}
+
+func TestAPIListRequestsSad(t *testing.T) {
+	sadAPI := &API{
+		Objects: &ObjectController{
+			bucket: aws.String("unit test"),
+			path:   "dang",
+			s3: &MockS3{
+				bucket: map[string]string{
+					"dang/fun/foo.obj/123abc":  "wonderful magic content",
+					"dang/work/bar.obj/456789": "more incredible content",
+				},
+				listObjectsErr: errors.New("boo hoo"),
+			},
+		},
+	}
+
+	listCategoriesRes := httptest.NewRecorder()
+	listCategoriesReq := httptest.NewRequest("GET", "/", nil)
+	sadAPI.ListCategoriesHandler(listCategoriesRes, listCategoriesReq)
+	if listCategoriesRes.Code != 500 {
+		t.Fatalf("API.ListCategoriesHandler should return a 500. Got: %d", listCategoriesRes.Code)
+	}
+
+	listObjectsRes := httptest.NewRecorder()
+	listObjectsReq := mux.SetURLVars(httptest.NewRequest("GET", "/fun", nil), map[string]string{
+		"category": "fun",
+	})
+	sadAPI.ListObjectsHandler(listObjectsRes, listObjectsReq)
+	if listObjectsRes.Code != 500 {
+		t.Fatalf("API.ListObjectsHandler should return a 500. Got %d", listObjectsRes.Code)
+	}
+
+	listVersionsRes := httptest.NewRecorder()
+	listVersionsReq := mux.SetURLVars(httptest.NewRequest("GET", "/fun/foo.obj/versions", nil), map[string]string{
+		"category": "fun",
+		"object":   "foo.obj",
+	})
+	sadAPI.ListObjectVersionsHandler(listVersionsRes, listVersionsReq)
+	if listVersionsRes.Code != 500 {
+		t.Fatalf("API.ListObjectVersionsHandler should return a 500. Got: %d", listVersionsRes.Code)
 	}
 }

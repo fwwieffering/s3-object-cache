@@ -2,9 +2,12 @@ package main
 
 import (
 	"bytes"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"io/ioutil"
+	"path"
+	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
@@ -15,6 +18,26 @@ import (
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/aws/aws-sdk-go/service/s3/s3iface"
 )
+
+// ListResponse helper struct to hold pagination / items for List commands
+type ListResponse struct {
+	Objects []string
+	Token   string
+}
+
+// base64 encode token string to make it ambiguous
+func marshalToken(token string) string {
+	return base64.StdEncoding.EncodeToString([]byte(token))
+}
+
+// base64 decode token string
+func unmarshalToken(token string) (string, error) {
+	final, err := base64.StdEncoding.DecodeString(token)
+	if err != nil {
+		return "", err
+	}
+	return string(final), nil
+}
 
 // ObjectController object to handle the storage, retrieval, and versioning of objects in s3 and dynamo
 type ObjectController struct {
@@ -51,6 +74,39 @@ func (o ObjectController) GetObject(objectName string, version string, dev bool)
 		return nil, fmt.Errorf("Error looking up version for object %s. Error:%s", objectName, err.Error())
 	}
 	return o.getObjectFromS3(objectName, version)
+}
+
+// ListCategories returns categories configured
+// // These are discovered by listing objects in s3
+// it would be better to store this info in a database
+func (o ObjectController) ListCategories(token string) (*ListResponse, error) {
+	return o.listObjectsS3(o.path, "/", token)
+}
+
+// ListObjects lists objects given in a specific categoryName
+// These are discovered by listing objects in s3
+// it would be better to store this info in a database
+func (o ObjectController) ListObjects(categoryName string, token string) (*ListResponse, error) {
+	objpath := path.Clean(categoryName)
+	if len(o.path) > 0 {
+		objpath = path.Join(o.path, objpath)
+	}
+	// add trailing slash
+	objpath += "/"
+	return o.listObjectsS3(objpath, "/", token)
+}
+
+// ListObjectVersions lists versions for a given object and category
+// These are discovered by listing objects in s3
+// it would be better to store this info in a database
+func (o ObjectController) ListObjectVersions(categoryName string, objectName string, token string) (*ListResponse, error) {
+	objpath := path.Join(categoryName, objectName)
+	if len(o.path) > 0 {
+		objpath = path.Join(o.path, objpath)
+	}
+	// add trailing slash
+	objpath += "/"
+	return o.listObjectsS3(objpath, "", token)
 }
 
 // SetObjectVersion sets default prod/dev version of object objectName to version version
@@ -167,6 +223,63 @@ func (o ObjectController) addObjectToDynamo(objectName string, dev bool, version
 	return nil
 }
 
+// listObjectsS3 returns a list of object names for a given path
+// the token is a base64 encoded string
+func (o ObjectController) listObjectsS3(path string, delimiter string, token string) (*ListResponse, error) {
+	isDelimiter := len(delimiter) > 0
+
+	input := &s3.ListObjectsInput{
+		Bucket:    o.bucket,
+		Prefix:    aws.String(path),
+		Delimiter: aws.String(delimiter),
+	}
+	// set Marker if token is provided for pagination
+	if len(token) > 0 {
+		startKey, err := unmarshalToken(token)
+		if err != nil {
+			return nil, err
+		}
+		input.Marker = aws.String(startKey)
+	}
+
+	objects, err := o.s3.ListObjects(input)
+	if err != nil {
+		return nil, err
+	}
+	// format response
+	res := &ListResponse{}
+
+	// collect Items
+	keys := make([]string, 0)
+	// if delimiter is provided we are treating CommonPrefixes as the items
+	if isDelimiter {
+		for _, k := range objects.CommonPrefixes {
+			// strip out any potential trailing delimiter chars
+			keys = append(keys, strings.Replace(*k.Prefix, delimiter, "", -1))
+		}
+	} else {
+		for _, k := range objects.Contents {
+			// only want the last item in the path for a key
+			splitKey := strings.Split(*k.Key, "/")
+			keys = append(keys, splitKey[len(splitKey)-1])
+		}
+	}
+	res.Objects = keys
+
+	// set pagination token
+	if *objects.IsTruncated {
+		nextKey := ""
+		if isDelimiter {
+			nextKey = *objects.NextMarker
+		} else { // NextToken should be key of last item in list of contents if no delimiter
+			nextKey = *objects.Contents[len(objects.Contents)-1].Key
+		}
+		res.Token = marshalToken(nextKey)
+	}
+
+	return res, nil
+}
+
 func (o ObjectController) getObjectFromDynamo(objectName string) (map[string]*dynamodb.AttributeValue, error) {
 	// function for making aws call
 	getObject := func() (*dynamodb.GetItemOutput, error) {
@@ -205,16 +318,14 @@ func (o ObjectController) getObjectVersion(objectName string, dev bool) (string,
 		val, ok := item["dev"]
 		if ok {
 			return *val.S, nil
-		} else {
-			return "", fmt.Errorf("No dev version set for object %s", objectName)
 		}
+		return "", fmt.Errorf("No dev version set for object %s", objectName)
 	}
 	val, ok := item["version"]
 	if ok {
 		return *val.S, nil
-	} else {
-		return "", fmt.Errorf("No version set for object %s", objectName)
 	}
+	return "", fmt.Errorf("No version set for object %s", objectName)
 }
 
 // generates the key for a object to be stored / retrieved from
