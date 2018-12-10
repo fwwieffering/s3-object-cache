@@ -5,7 +5,7 @@ deps:
 	dep ensure
 
 container: build
-	docker build -t fwwieffering/s3-object-cache-sidecar .
+	docker build -t fwieffering/s3-object-cache-sidecar .
 
 run: container
 	docker run -p 8080:80 fwwieffering/s3-object-cache-sidecar
