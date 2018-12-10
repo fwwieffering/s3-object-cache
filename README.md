@@ -1,4 +1,5 @@
 # S3 Object Service
+[![Build Status](https://travis-ci.com/fwwieffering/s3-object-cache.svg?branch=master)](https://travis-ci.com/fwwieffering/s3-object-cache)
 ## What is it?
 S3 is an AWS's implementation of an object store. It is excellent and industry standard. However, migrating to using S3 as an object store can have some hiccups if you previously used a filesystem for distributing objects.
 
