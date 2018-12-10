@@ -63,10 +63,82 @@ func (d *MockDynamo) GetItem(input *dynamodb.GetItemInput) (*dynamodb.GetItemOut
 
 type MockS3 struct {
 	s3iface.S3API
-	bucket        map[string]string
-	putObjectErr  error
-	getObjectErr  error
-	headObjectErr error
+	bucket         map[string]string
+	putObjectErr   error
+	getObjectErr   error
+	headObjectErr  error
+	listObjectsErr error
+}
+
+// mocks s3 ListObjects, but always returns page size of 1
+// WARNING sometimes the pagination fails because maps are not ordered, and the
+// mock S3 bucket implementation is a map
+func (m *MockS3) ListObjects(input *s3.ListObjectsInput) (*s3.ListObjectsOutput, error) {
+	if m.listObjectsErr != nil {
+		return nil, m.listObjectsErr
+	}
+	prefix := *input.Prefix
+
+	items := make([]*s3.Object, 0)
+	prefixes := make([]*s3.CommonPrefix, 0)
+	doPrefix := len(*input.Delimiter) > 0
+
+	tokenProvided := input.Marker != nil && len(*input.Marker) > 0
+	pastToken := !tokenProvided
+	isTruncated := false
+
+	for k := range m.bucket {
+		if strings.Contains(k, prefix) {
+			// if first item found but theres more stuff set isTruncated to true
+			if len(items) > 0 || len(prefixes) > 0 {
+				isTruncated = true
+			} else if pastToken { // if the token has been found or isn't provided return first item
+				if doPrefix {
+					// if there is a prefix provided, remove that prefix
+					var prefixRemoved = k
+					if len(prefix) > 0 {
+						splitStr := strings.Split(k, prefix)
+						prefixRemoved = splitStr[len(splitStr)-1]
+					}
+					// split on delimiter
+					final := strings.Split(prefixRemoved, *input.Delimiter)[0]
+					prefixes = append(prefixes, &s3.CommonPrefix{
+						Prefix: aws.String(strings.Split(final, *input.Delimiter)[0]),
+					})
+				} else {
+					items = append(items, &s3.Object{
+						Key: aws.String(k),
+					})
+				}
+			} else if tokenProvided { // if tokenprovided and not pastToken we haven't hit the pagination marker yet
+				if doPrefix {
+					if strings.Contains(k, *input.Marker) {
+						pastToken = true
+					}
+				} else {
+					if strings.Compare(k, *input.Marker) == 0 {
+						pastToken = true
+					}
+				}
+			}
+		}
+	}
+
+	if doPrefix {
+		var nextMarker *string
+		if len(prefixes) > 0 {
+			nextMarker = prefixes[0].Prefix
+		}
+		return &s3.ListObjectsOutput{
+			CommonPrefixes: prefixes,
+			IsTruncated:    aws.Bool(isTruncated),
+			NextMarker:     nextMarker,
+		}, nil
+	}
+	return &s3.ListObjectsOutput{
+		Contents:    items,
+		IsTruncated: aws.Bool(isTruncated),
+	}, nil
 }
 
 func (m *MockS3) PutObject(input *s3.PutObjectInput) (*s3.PutObjectOutput, error) {
@@ -138,7 +210,7 @@ func TestAddObjectToDynamoRetries(t *testing.T) {
 		table: aws.String("unit test"),
 		ddb: &MockDynamo{
 			putItemErr: []error{
-				awserr.New(dynamodb.ErrCodeProvisionedThroughputExceededException, "poo", errors.New("ok")),
+				awserr.New(dynamodb.ErrCodeProvisionedThroughputExceededException, "foo", errors.New("ok")),
 			},
 		},
 	}
@@ -241,6 +313,97 @@ func TestAddObjectToS3(t *testing.T) {
 	}
 }
 
+// WARNING sometimes the pagination fails because maps are not ordered, and the
+// mock S3 bucket implementation is a map
+func TestListObjectsS3(t *testing.T) {
+	mocker := ObjectController{
+		bucket: aws.String("unit test"),
+		path:   "dang",
+		s3: &MockS3{
+			bucket: map[string]string{
+				"foo.obj/123abc": "wonderful magic content",
+				"bar.obj/456789": "more incredible content",
+			},
+		},
+	}
+	res, _ := mocker.listObjectsS3("", "", "")
+	if len(res.Token) == 0 {
+		t.Fatalf("listObjectsS3 should have returned a token")
+	}
+	res, _ = mocker.listObjectsS3("", "", res.Token)
+	// can't test pagination due to mock s3 listobject implementation
+	// totalItems += len(res2.Objects)
+	// if strings.Compare(res2.Objects[0], res.Objects[0]) == 0 {
+	// 	t.Fatalf("listObjectsS3 returned the same item twice instead of paginating")
+	// }
+	// if totalItems != 2 {
+	// 	t.Fatalf("there should be 2 total items across all pages. Was: %d", totalItems)
+	// }
+
+	delimiterRes, _ := mocker.listObjectsS3("", "/", "")
+	if !strings.Contains(delimiterRes.Objects[0], ".obj") {
+		t.Fatalf("when / is provided as a delimiter the objects should be either foo.obj or bar.obj. Was: %s", delimiterRes.Objects[0])
+	}
+}
+
+func TestListCategories(t *testing.T) {
+	mocker := ObjectController{
+		bucket: aws.String("unit test"),
+		path:   "",
+		s3: &MockS3{
+			bucket: map[string]string{
+				"fun/foo.obj/123abc": "wonderful magic content",
+			},
+		},
+	}
+	listCategories, _ := mocker.ListCategories("")
+	if len(listCategories.Objects) == 0 {
+		t.Fatalf("ListCategories should return a category. Received 0 results")
+	}
+	if strings.Compare(listCategories.Objects[0], "fun") != 0 {
+		t.Fatalf("ListCategories should return first item in path. either fun or work. Was: %s", listCategories.Objects[0])
+	}
+}
+
+func TestListObjects(t *testing.T) {
+	mocker := ObjectController{
+		bucket: aws.String("unit test"),
+		path:   "dang",
+		s3: &MockS3{
+			bucket: map[string]string{
+				"dang/fun/foo.obj/123abc":  "wonderful magic content",
+				"dang/work/bar.obj/456789": "more incredible content",
+			},
+		},
+	}
+	listObjects, _ := mocker.ListObjects("fun", "")
+	if len(listObjects.Objects) == 0 {
+		t.Fatalf("ListObjects should return an object. Received 0 results")
+	}
+	if strings.Compare(listObjects.Objects[0], "foo.obj") != 0 {
+		t.Fatalf("The only object in the 'fun' category is 'foo.obj'. Received: %v", listObjects.Objects)
+	}
+}
+
+func TestListObjectVersions(t *testing.T) {
+	mocker := ObjectController{
+		bucket: aws.String("unit test"),
+		path:   "dang",
+		s3: &MockS3{
+			bucket: map[string]string{
+				"dang/fun/foo.obj/123abc": "wonderful magic content",
+			},
+		},
+	}
+	listObjectVersions, _ := mocker.ListObjectVersions("fun", "foo.obj", "")
+	if len(listObjectVersions.Objects) == 0 {
+		t.Fatalf("ListObjectVersions should return a version. Received 0 results")
+	}
+	if strings.Compare(listObjectVersions.Objects[0], "123abc") != 0 {
+		t.Fatalf("listObjectVersions should return first item in path. either fun or work. Was: %s", listObjectVersions.Objects[0])
+	}
+}
+
 func TestGetObjectFromS3(t *testing.T) {
 	mocker := ObjectController{
 		bucket: aws.String("unit test"),
@@ -256,7 +419,7 @@ func TestGetObjectFromS3(t *testing.T) {
 	}
 
 	mocker.addObjectToS3("someobject", "123", strings.NewReader("ok"))
-	body, err = mocker.getObjectFromS3("someobject", "123")
+	_, err = mocker.getObjectFromS3("someobject", "123")
 	if err != nil {
 		t.Fatalf("getObjectFromS3 should not return an error when the key exists: %v", err)
 	}
