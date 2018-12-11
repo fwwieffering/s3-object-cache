@@ -1,0 +1,440 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Parameters": {
+    "VpcId": {
+      "Type": "String",
+      "Description": "AWS VPC ID e.g. vpc-12354895"
+    },
+    "SubnetList": {
+      "Type": "CommaDelimitedList",
+      "Description": "Comma separated list of subnets for the load balancer"
+    },
+    "CertificateId": {
+      "Type": "String",
+      "Description": "AWS ACM Certificate ID for load balancer HTTPS. Must be in same region as this stack"
+    },
+    "DNSName": {
+      "Type": "String",
+      "Description": "FQDN for the api, e.g objects.example.com"
+    },
+    "DNSZone": {
+      "Type": "String",
+      "Description": "AWS Route53 zone name, e.g. example.com."
+    },
+    "S3Bucket": {
+      "Type": "String",
+      "Description": "S3 Bucket name for s3-object-cache storage. Must be in same region as this stack"
+    },
+    "DynamoDBTable": {
+      "Type": "String",
+      "Description": "DynamoDB table name for s3-object-cache storage. Must be in same region as this stack"
+    }
+  },
+  "Resources": {
+    "DNSRecordSet": {
+      "Type": "AWS::Route53::RecordSet",
+      "Properties": {
+        "AliasTarget": {
+          "DNSName": {
+            "Fn::GetAtt": [
+              "LoadBalancer",
+              "DNSName"
+            ]
+          },
+          "HostedZoneId": {
+            "Fn::GetAtt": [
+              "LoadBalancer",
+              "CanonicalHostedZoneID"
+            ]
+          }
+        },
+        "Comment": {
+          "Fn::Sub": "DNS record for ${AWS::StackName} in ${AWS::Region}"
+        },
+        "HostedZoneName": {
+            "Ref": "DNSZone"
+        },
+        "Name": {
+            "Ref": "DNSName"
+        },
+        "Type": "A"
+      }
+    },
+    "LoadBalancer": {
+      "Type": "AWS::ElasticLoadBalancingV2::LoadBalancer",
+      "DependsOn": [
+          "LoadBalancerSecurityGroup"
+      ],
+      "Properties": {
+        "LoadBalancerAttributes": [],
+        "Scheme": "internal",
+        "SecurityGroups": [
+          {
+            "Ref": "LoadBalancerSecurityGroup"
+          }
+        ],
+        "Subnets": {
+          "Ref": "SubnetList"
+        }
+      }
+    },
+    "ServiceSecurityGroup": {
+      "Type": "AWS::EC2::SecurityGroup",
+      "Properties": {
+        "GroupDescription": "Security group to allow ALB access to task port",
+        "SecurityGroupIngress": [
+          {
+              "SourceSecurityGroupId": {"Fn::GetAtt": ["LoadBalancerSecurityGroup", "GroupId"]},
+              "IpProtocol": "tcp",
+              "ToPort": "80",
+              "FromPort": "80"
+          }
+        ],
+        "VpcId": {
+          "Ref": "VpcId"
+        }
+      }
+    },
+    "LoadBalancerSecurityGroup": {
+      "Type": "AWS::EC2::SecurityGroup",
+      "Properties": {
+        "GroupDescription": "ALB Secuirty Group",
+        "SecurityGroupIngress": [
+          {
+              "CidrIp": "0.0.0.0/0",
+              "FromPort": "443",
+              "IpProtocol": "tcp",
+              "ToPort": "443"
+          }
+        ],
+        "VpcId": {
+          "Ref": "VpcId"
+        }
+      }
+    },
+    "LoadBalancerListener": {
+      "Type": "AWS::ElasticLoadBalancingV2::Listener",
+      "Properties": {
+        "Certificates": [
+          {
+            "CertificateArn": {
+              "Fn::Sub": "arn:aws:acm:${AWS::Region}:${AWS::AccountId}:certificate/${CertificateId}"
+            }
+          }
+        ],
+        "DefaultActions": [
+          {
+            "TargetGroupArn": {
+              "Ref": "TargetGroup"
+            },
+            "Type": "forward"
+          }
+        ],
+        "LoadBalancerArn": {
+          "Ref": "LoadBalancer"
+        },
+        "Port": 443,
+        "Protocol": "HTTPS"
+      }
+    },
+    "LoadBalancerListenerRule": {
+      "Type": "AWS::ElasticLoadBalancingV2::ListenerRule",
+      "Properties": {
+        "Actions": [
+          {
+            "TargetGroupArn": {
+              "Ref": "TargetGroup"
+            },
+            "Type": "forward"
+          }
+        ],
+        "Conditions": [
+          {
+            "Field": "path-pattern",
+            "Values": [
+              "/"
+            ]
+          }
+        ],
+        "ListenerArn": {
+          "Ref": "LoadBalancerListener"
+        },
+        "Priority": "1"
+      }
+    },
+    "TargetGroup": {
+      "Properties": {
+        "TargetType": "ip",
+        "HealthCheckIntervalSeconds": 10,
+        "HealthCheckPath": "/up",
+        "HealthCheckProtocol": "HTTP",
+        "HealthCheckTimeoutSeconds": 5,
+        "HealthyThresholdCount": 2,
+        "Name": {
+          "Fn::Join": [
+            "-",
+            [
+              "TG",
+              {
+                "Fn::Select": [
+                  2,
+                  {
+                    "Fn::Split": [
+                      "/",
+                      {
+                        "Fn::GetAtt": [
+                          "LoadBalancer",
+                          "LoadBalancerFullName"
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          ]
+        },
+        "Port": 1,
+        "Protocol": "HTTP",
+        "TargetGroupAttributes": [
+          {
+            "Key": "deregistration_delay.timeout_seconds",
+            "Value": "60"
+          }
+        ],
+        "UnhealthyThresholdCount": 4,
+        "VpcId": {
+          "Ref": "VpcId"
+        }
+      },
+      "Type": "AWS::ElasticLoadBalancingV2::TargetGroup"
+    },
+    "LogGroup": {
+      "Type": "AWS::Logs::LogGroup",
+      "Properties": {
+        "LogGroupName": "s3-object-cache-api",
+        "RetentionInDays": 7
+      }
+    },
+    "Service": {
+      "DependsOn": [
+          "ServiceRole",
+          "LoadBalancerListener"
+      ],
+      "Type": "AWS::ECS::Service",
+      "Properties": {
+        "LaunchType": "FARGATE",
+        "NetworkConfiguration": {
+          "AwsvpcConfiguration": {
+            "AssignPublicIp": "DISABLED",
+            "Subnets": {
+              "Ref": "SubnetList"
+            },
+            "SecurityGroups": [
+              {"Ref": "ServiceSecurityGroup"}
+            ]
+          }
+        },
+        "DesiredCount": 2,
+        "HealthCheckGracePeriodSeconds": 3,
+        "LoadBalancers": [
+          {
+            "ContainerName": "s3-object-cache-api",
+            "ContainerPort": 80,
+            "TargetGroupArn": {
+              "Ref": "TargetGroup"
+            }
+          }
+        ],
+        "TaskDefinition": {
+            "Ref": "Task"
+        }
+      }
+    },
+    "ServiceRole": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "ecs.amazonaws.com"
+              }
+            }
+          ]
+        },
+        "Policies": [
+          {
+            "PolicyDocument": {
+              "Statement": [
+                {
+                  "Action": [
+                    "elasticloadbalancing:DeregisterInstancesFromLoadBalancer",
+                    "elasticloadbalancing:DeregisterTargets",
+                    "elasticloadbalancing:RegisterTargets",
+                    "elasticloadbalancing:RegisterInstancesWithLoadBalancer",
+                    "elasticloadbalancing:Describe*",
+                    "elasticloadbalancing:DescribeTargetGroups",
+                    "elasticloadbalancing:DescribeTargetHealth",
+                    "ec2:Describe*",
+                    "ec2:AuthorizeSecurityGroupIngress"
+                  ],
+                  "Effect": "Allow",
+                  "Resource": "*"
+                }
+              ]
+            },
+            "PolicyName": "ecsService"
+          }
+        ]
+      },
+      "Type": "AWS::IAM::Role"
+    },
+    "Task": {
+      "Type": "AWS::ECS::TaskDefinition",
+      "Properties": {
+        "Cpu": "512",
+        "Memory": "2GB",
+        "RequiresCompatibilities": ["FARGATE"],
+        "ContainerDefinitions": [
+          {
+            "Environment": [
+              {
+                "Name": "S3_BUCKET",
+                "Value": {
+                  "Ref": "S3Bucket"
+                }
+              },
+              {
+                "Name": "DYNAMO_TABLE",
+                "Value": {
+                  "Ref": "DynamoDBTable"
+                }
+              }
+            ],
+            "Image": "fwieffering/s3-object-cache:latest",
+            "LogConfiguration": {
+              "LogDriver": "awslogs",
+              "Options": {
+                "awslogs-group": {
+                  "Ref": "LogGroup"
+                },
+                "awslogs-region": {
+                  "Fn::Sub": "${AWS::Region}"
+                },
+                "awslogs-stream-prefix": "s3-obejct-cache"
+              }
+            },
+            "Name": "s3-object-cache-api",
+            "PortMappings": [
+              {
+                "ContainerPort": 80
+              }
+            ]
+          }
+        ],
+        "NetworkMode": "awsvpc",
+        "PlacementConstraints": [],
+        "ExecutionRoleArn": {
+          "Fn::GetAtt": [
+            "ExecutionRole",
+            "Arn"
+          ]
+        },
+        "TaskRoleArn": {
+          "Fn::GetAtt": [
+            "TaskRole",
+            "Arn"
+          ]
+        },
+      }
+    },
+    "TaskRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "ecs-tasks.amazonaws.com"
+              }
+            }
+          ]
+        },
+        "Path": "/app/",
+        "Policies": [
+          {
+            "PolicyName": "StorageAccess",
+            "PolicyDocument": {
+              "Statement": [
+                {
+                  "Action": [
+                      "dynamodb:*",
+                  ],
+                  "Effect": "Allow",
+                  "Resource": {
+                    "Fn::Sub": "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${DynamoDBTable}"
+                  }
+                },
+                {
+                  "Action": [
+                      "s3:ListBucket",
+                  ],
+                  "Effect": "Allow",
+                  "Resource": {
+                    "Fn::Sub": "arn:aws:s3:::${S3Bucket}"
+                  }
+                },
+                {
+                  "Action": [
+                      "s3:Get*",
+                      "s3:Put*"
+                  ],
+                  "Effect": "Allow",
+                  "Resource": {
+                    "Fn::Sub": "arn:aws:s3:::${S3Bucket}/*"
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "ExecutionRole": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "ecs-tasks.amazonaws.com"
+              }
+            }
+          ]
+        },
+        "Policies": [
+          {
+            "PolicyDocument": {
+              "Statement": [
+                {
+                  "Action": [
+                    "logs:*"
+                  ],
+                  "Effect": "Allow",
+                  "Resource": "*"
+                }
+              ]
+            },
+            "PolicyName": "ecsService"
+          }
+        ]
+      },
+      "Type": "AWS::IAM::Role"
+    },
+  }
+}
