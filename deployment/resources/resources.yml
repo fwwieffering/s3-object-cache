@@ -1,0 +1,38 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Resources:
+  MapBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub s3-object-cache-${AWS::AccountId}-${AWS::Region}
+
+  MapTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub s3-object-cache-versions
+      AttributeDefinitions:
+        - AttributeName: name
+          AttributeType: S
+      KeySchema:
+        - AttributeName: name
+          KeyType: HASH
+      ProvisionedThroughput:
+        ReadCapacityUnits: 100
+        WriteCapacityUnits: 5
+
+
+Outputs:
+  TableArn:
+    Value: !GetAtt MapTable.Arn
+    Export:
+      Name: !Sub ${AWS::StackName}:ObjectCacheTableArn
+
+  BucketArn:
+    Value: !GetAtt MapBucket.Arn
+    Export:
+      Name: !Sub ${AWS::StackName}:ObjectCacheBucketArn
+
+  BucketItemArn:
+    Value: !Sub [ "${Bucket}/*", {Bucket: !GetAtt MapBucket.Arn}]
+    Export:
+      Name: !Sub ${AWS::StackName}:ObjectCachetItemArn

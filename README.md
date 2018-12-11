@@ -11,6 +11,9 @@ This project attempts to solve those problems by doing the following:
 - Implementing a [sidecar / daemonset](https://github.com/fwwieffering/s3-object-cache/blob/master/sidecar) to solve the caching problem at an infrastructure level. Instead of requesting the object service directly, clients can request the local daemonset which will handle the caching and allow for higher performance.
 
 ## Endpoints
+- `GET` `/`: List Categories
+- `GET` `/{category}`: List objects in category `{category}`
+- `GET` `/{category}/{object name}/versions`: List versions for object `{object}` in category `{category}`
 - `POST` `/{category}/{object name}/{version}`: Add an object with object name `{object name}` to the object service with version `{version}`. The object content must be sent in the body of the HTTP request. `{category}` provides a way of bucketing object types
   - Object versions can not be overwritten. If a POST is sent with the same object name and version an error will be returned.
   - adding an Object does not set the default object version
@@ -26,20 +29,8 @@ This project attempts to solve those problems by doing the following:
 
 
 ## Deployment
-TODO: provide a parameterized cloudformation stack. Until then, there are two pieces to deploy:
-
-- Object service
-  - DNS Accessible service. run `make container` to build the docker container for the Service
-  - requires an S3 bucket for object storage and a DynamoDB Table for storing object versions
-  - requires IAM permissions:
-    - `s3:ListBucket`, `s3:Put*`, `s3:Get*` on whatever bucket is to be used for the object storage
-    - `dynamodb:*` on whatever table is used for object versions
-
-- Daemonset container:
-  - must be run on every node of client applications as a daemonset, or as a docker sidecar of dockerized client applications
-  - Object Service URL must be provided to the sidecar as an env variable
+[Check out the deployment section](./deployment)
 
 ## Future Work
 - add api authentication
 - error code improvements, currently all errors are returned as 5XX
-- Add list method, and basic UI for navigating objects
